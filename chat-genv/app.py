@@ -2,8 +2,11 @@ import streamlit as st
 import google.generativeai as genai
 from googletrans import Translator
 import speech_recognition as sr
-from functions import get_secret, reset_chat
+from functions import get_secret, reset_chat, transcribe_audio
 from audio_recorder_streamlit import audio_recorder
+import io
+from pydub import AudioSegment
+import tempfile
 
 # --- Configuration ---
 api_key = get_secret("API_KEY")
@@ -39,6 +42,8 @@ if "target_lang" not in st.session_state:
     st.session_state.target_lang = "en"
 if "show_original" not in st.session_state:
     st.session_state.show_original = False
+if "audio_processing" not in st.session_state:
+    st.session_state.audio_processing = False
 
 # --- Sidebar Controls ---
 with st.sidebar:
@@ -62,7 +67,10 @@ with st.sidebar:
     st.title("🎤 Speech Input")
     audio_bytes = audio_recorder(
         pause_threshold=2.0,
+        sample_rate=16000,
         text="Click to speak",
+        recording_color="#e8b62c",
+        neutral_color="#6aa36f",
         key="audio_recorder"
     )
     
@@ -81,17 +89,6 @@ with st.sidebar:
     if st.button("Reset Chat"):
         reset_chat()
 
-# --- Audio Processing ---
-def transcribe_audio(audio_bytes):
-    r = sr.Recognizer()
-    try:
-        with sr.AudioFile(audio_bytes) as source:
-            audio = r.record(source)
-            return r.recognize_google(audio)
-    except Exception as e:
-        st.error(f"Speech recognition failed: {e}")
-        return None
-
 # --- Chat Interface ---
 st.title("💻 Bilingual Code Tutor")
 
@@ -108,10 +105,23 @@ for role, message in st.session_state.chat_history:
 
 # --- Input Processing ---
 user_input = ""
-if audio_bytes:
-    user_input = transcribe_audio(audio_bytes)
+if audio_bytes and not st.session_state.audio_processing:
+    st.session_state.audio_processing = True
+    with st.spinner("Processing audio..."):
+        # Show the recorded audio
+        st.audio(audio_bytes, format="audio/wav")
+        
+        # Transcribe audio
+        user_input = transcribe_audio(audio_bytes)
+        if user_input:
+            st.session_state.user_input = user_input
+    st.session_state.audio_processing = False
 else:
     user_input = st.chat_input("Type or speak your question...")
+
+if 'user_input' in st.session_state and st.session_state.user_input:
+    user_input = st.session_state.user_input
+    del st.session_state.user_input
 
 if user_input:
     # Append user message
