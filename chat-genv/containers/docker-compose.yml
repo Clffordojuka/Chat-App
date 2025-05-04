@@ -1,17 +1,11 @@
-version: '3.8'
-
 services:
-  bilingual-tutor:
+  chat-genv:
     build: .
     container_name: chat-genv
     ports:
       - "8501:8501"
-    env_file: 
-      - .env  
-    environment:
-      - API_KEY=${API_KEY}  
+    env_file: .env 
+    
     volumes:
       - .:/app
     restart: unless-stopped
-    devices: 
-      - "/dev/snd:/dev/snd"
