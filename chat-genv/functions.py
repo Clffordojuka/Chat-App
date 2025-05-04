@@ -1,139 +1,96 @@
 import streamlit as st
 import os
-from dotenv import load_dotenv
 import io
 import tempfile
+import platform
+from dotenv import load_dotenv
+from typing import Optional
 from pydub import AudioSegment
 import speech_recognition as sr
-from typing import Optional, Union
 
 def get_secret(key: str) -> Optional[str]:
     """
-    Enhanced secret manager with better error handling and type hints
-    
-    Args:
-        key: The secret/environment variable name to retrieve
-        
-    Returns:
-        The secret value or None if not found
+    Enhanced secret manager with Windows compatibility
     """
     try:
-        # Try Streamlit secrets (for cloud)
-        if hasattr(st, 'secrets'):
-            return st.secrets[key]
-        raise KeyError("Streamlit secrets not available")
-    except (KeyError, AttributeError, FileNotFoundError):
-        try:
-            # Fallback to .env file (for local)
-            load_dotenv()
-            value = os.getenv(key)
-            if not value:
-                st.warning(f"Secret {key} is empty in .env file")
-            return value
-        except Exception as e:
-            st.error(f"Error loading secret {key}: {str(e)}")
-            return None
+        return st.secrets[key]
+    except Exception:
+        load_dotenv()
+        return os.getenv(key)
 
 def reset_chat(complete_reset: bool = True) -> None:
     """
-    Comprehensive chat reset with audio cleanup
-    
-    Args:
-        complete_reset: If True, resets all session variables
-                       If False, only resets chat history
+    Reset chat with Windows-specific cleanup
     """
-    # Core chat reset
     st.session_state.chat_history = []
-    
     if complete_reset:
-        # Extended state cleanup
         st.session_state.update({
-            'example': False,
-            'temperature': 0.7,
-            'translation_enabled': True,
-            'show_technical_terms': False,
-            'audio_processing': False,
-            'user_input': None
+            'audio_file': None,
+            'audio_processed': False
         })
-        
-        # Clean up temporary files
-        if 'audio_file' in st.session_state:
+        if 'audio_file' in st.session_state and st.session_state.audio_file:
             try:
                 if os.path.exists(st.session_state.audio_file):
                     os.remove(st.session_state.audio_file)
             except Exception as e:
-                st.error(f"Error cleaning audio file: {str(e)}")
-            finally:
-                if 'audio_file' in st.session_state:
-                    del st.session_state.audio_file
-    
-    # Visual confirmation
-    st.toast("Chat history cleared!", icon="🔄")
+                st.warning(f"Couldn't clean audio file: {e}")
 
 def transcribe_audio(audio_bytes: bytes) -> Optional[str]:
     """
-    Robust audio transcription with format conversion and error handling
-    
-    Args:
-        audio_bytes: Raw audio data in bytes
-        
-    Returns:
-        Transcribed text or None if failed
+    Windows-compatible audio transcription with robust error handling
     """
     try:
         # Initialize recognizer
         r = sr.Recognizer()
         
-        # Create temporary file path
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
-            tmp_path = tmp_file.name
+        # Create temporary file path with explicit directory
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, f"audio_{os.getpid()}.wav")
         
-        try:
-            # Convert bytes to AudioSegment
-            audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
-            
-            # Export as WAV with proper settings
-            audio.set_frame_rate(16000).set_channels(1).export(
-                tmp_path,
-                format="wav",
-                codec="pcm_s16le"
-            )
-            
-            # Process audio file
-            with sr.AudioFile(tmp_path) as source:
+        # Convert and save audio with Windows-specific settings
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        
+        # Handle Windows-specific audio format requirements
+        if platform.system() == "Windows":
+            audio = audio.set_frame_rate(16000).set_channels(1)
+            audio.export(temp_path, format="wav", codec="pcm_s16le")
+        else:
+            audio.export(temp_path, format="wav")
+        
+        # Process audio with explicit file handling
+        with open(temp_path, 'rb') as audio_file:
+            with sr.AudioFile(audio_file) as source:
                 audio_data = r.record(source)
                 text = r.recognize_google(audio_data)
                 return text
                 
-        finally:
-            # Clean up temporary file
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-                
     except sr.UnknownValueError:
-        st.error("Could not understand audio. Please speak clearly.")
-        return None
+        st.error("Couldn't understand audio. Please speak clearly.")
     except sr.RequestError as e:
-        st.error(f"Speech recognition service error: {str(e)}")
-        return None
+        st.error(f"Speech service error: {e}")
     except Exception as e:
-        st.error(f"Audio processing failed: {str(e)}")
-        return None
+        st.error(f"Audio processing failed: {e}")
+    finally:
+        # Ensure file cleanup
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception as e:
+                st.warning(f"Couldn't clean temp file: {e}")
+    return None
 
-def save_audio_to_temp(audio_bytes: bytes) -> Optional[str]:
+def windows_audio_setup():
     """
-    Save audio bytes to temporary file and return path
-    
-    Args:
-        audio_bytes: Raw audio data
-        
-    Returns:
-        Path to temporary file or None if failed
+    Windows-specific audio setup checks and instructions
     """
-    try:
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-            tmp.write(audio_bytes)
-            return tmp.name
-    except Exception as e:
-        st.error(f"Failed to save audio: {str(e)}")
-        return None
+    if platform.system() == "Windows":
+        st.sidebar.markdown("### Windows Audio Setup")
+        if not os.path.exists(os.path.join(os.getenv('SystemRoot'), 'System32', 'Speech')):
+            st.sidebar.warning("""
+            **Required Windows Components Missing**:
+            1. Open 'Turn Windows features on or off'
+            2. Enable 'Windows Media Player' and 'Speech Recognition'
+            3. Restart your computer
+            """)
+        if not os.path.exists(os.path.join(os.getenv('ProgramFiles'), 'Windows Media Player')):
+            st.sidebar.warning("Windows Media Player required for audio processing")
