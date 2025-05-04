@@ -11,3 +11,5 @@ services:
     volumes:
       - .:/app
     restart: unless-stopped
+  devices:
+  - "/dev/snd:/dev/snd"
